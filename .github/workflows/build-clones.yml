@@ -18,6 +18,10 @@ on:
         description: 'Rebuild even if the latest upstream version is already released'
         type: boolean
         default: false
+      version:
+        description: 'Pin a Photos version (must be in bundle supported_versions in clones.json); empty = track upstream latest'
+        type: string
+        default: '' 
 
 permissions:
   contents: write
@@ -40,6 +44,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           FORCE: ${{ inputs.force || false }}
+          PIN_VERSION: ${{ inputs.version || '' }}
         run: python3 scripts/build_clones.py detect
 
   build:
