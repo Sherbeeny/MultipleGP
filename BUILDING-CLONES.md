@@ -1,4 +1,11 @@
-# Building side-by-side Google Photos clones
+# Building side-by-side Google Photos clones (FALLBACK path)
+
+> STATUS (2026-10-22, PR #7 / issue #6): the primary build clones the already-De-Vanced-patched
+> universal APK shipped in `mentalblank/GPhotos-Revanced` release assets - no stock mirrors,
+> no local patch bundle. This document remains as the documented FALLBACK: if the apktool
+> package rename ever proves incomplete, return to the stock-APK + morphe bundle path below
+> and apply the bundle's "Custom package name" patch described here.
+
 
 Goal: install several patched Google Photos copies on one device at the same time,
 each with its own package name, its own provider authorities, and its own Google
