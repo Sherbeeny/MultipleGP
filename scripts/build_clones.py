@@ -19,8 +19,8 @@ CFG = json.load(open(os.path.join(ROOT, "clones.json")))
 OUT = os.path.join(ROOT, "out")
 WORK = os.path.join(ROOT, "work")
 
-MORPHE_CLI = "https://github.com/MorpheApp/morphe-cli/releases/download/v1.3.0/morphe-cli-1.3.0-all.jar"
-APKTOOL = "https://github.com/iBotPeaches/Apktool/releases/download/v2.12.1/apktool_2.12.1.jar"
+MORPHE_CLI = "https://github.com/MorpheApp/morphe-desktop/releases/download/v1.18.1/morphe-desktop-1.18.1-all.jar"  # morphe-cli redirects to morphe-desktop; v1.18.1 verified 2026-10-22
+APKTOOL = "https://github.com/iBotPeaches/Apktool/releases/download/v3.0.3/apktool_3.0.3.jar"  # latest verified 2026-10-22
 
 
 def sh(*args, **kw):
@@ -45,12 +45,19 @@ def clone(letter):
 
 
 def version_of(rel):
-    """First dotted version token in the upstream release tag or title."""
-    for s in (rel.get("tag_name") or "", rel.get("name") or ""):
-        m = re.search(r"(\d+\.\d+(?:\.\d+)*)", s)
-        if m:
-            return m.group(1)
-    sys.exit("could not parse version from upstream release: %r" % rel.get("tag_name"))
+    """Longest dotted version token anywhere in the upstream release (tag, title,
+    asset names, body). mentalblank tags are bare build numbers ("44"); the real
+    Photos version lives in the asset name/body, e.g. 7.92.0.977185651."""
+    hay = [rel.get("tag_name") or "", rel.get("name") or "", rel.get("body") or ""]
+    hay += [a.get("name", "") for a in rel.get("assets", [])]
+    best = None
+    for s in hay:
+        for m in re.finditer(r"\d+\.\d+(?:\.\d+)+", s):
+            if best is None or len(m.group(0)) > len(best):
+                best = m.group(0)
+    if best is None:
+        sys.exit("could not parse version from upstream release: %r" % rel.get("tag_name"))
+    return best
 
 
 def cmd_detect():
