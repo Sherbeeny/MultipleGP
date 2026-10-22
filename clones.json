@@ -1,0 +1,21 @@
+{
+  "comment": "Single source of truth for the clone family. Add a copy or rename one by editing ONLY this file and committing; the next scheduled (21st, Africa/Cairo) or manual run picks it up. 'letter' is the variant letter; app_name is the launcher label; package must be unique per clone and stay fixed FOREVER once a clone has been installed on a device (renaming a package = new app, old data orphaned).",
+  "upstream": {
+    "track_repo": "mentalblank/GPhotos-Revanced",
+    "stock_apk_sources": [
+      "https://archive.org/download/jhc-apks/com.google.android.apps.photos_{version}.apk",
+      "https://d.apkpure.com/b/APK/com.google.android.apps.photos?version={version}"
+    ]
+  },
+  "bundle": {
+    "patches_repo": "De-Vanced/morphe-google-photos",
+    "patches_ref": "v1.15.4",
+    "reference_only": "Akash-Sriram/morphe-google-photos (behavioral reference, GPL chain unverified - no copied code)"
+  },
+  "clones": [
+    {"letter": "A", "app_name": "PhotosA", "package": "app.gclone.a"},
+    {"letter": "S", "app_name": "PhotosS", "package": "app.gclone.s"},
+    {"letter": "W", "app_name": "PhotosW", "package": "app.gclone.w"},
+    {"letter": "X", "app_name": "PhotosX", "package": "app.gclone.x"}
+  ]
+}
