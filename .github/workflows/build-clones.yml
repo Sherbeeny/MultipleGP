@@ -22,6 +22,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: build-clones
+  cancel-in-progress: false
+
 jobs:
   gate:
     runs-on: ubuntu-latest
@@ -31,12 +35,7 @@ jobs:
       matrix: ${{ steps.det.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
-      - name: Cairo day gate (scheduled runs only build on the 21st)
-        id: day
-        run: |
-          D=$(TZ=Africa/Cairo date +%-d)
-          echo "cairo_day=$D" >> "$GITHUB_OUTPUT"
-      - name: Detect upstream version + decide
+      - name: Detect upstream version + decide (Cairo 21st gate is inside the script)
         id: det
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -83,6 +82,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
       - uses: actions/download-artifact@v4
         with:
           pattern: clone-*
