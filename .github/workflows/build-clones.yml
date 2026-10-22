@@ -1,0 +1,120 @@
+name: Build Google Photos clones
+
+# Sherbo's requirements (topic 76, 2026-10-22):
+# - track mentalblank/GPhotos-Revanced for new versions
+# - run on the 21st of each month + manual dispatch
+# - build the clones from clones.json and put them in Releases for Obtainium
+# GATES CLEARED 2026-10-22: G1 halal ruling APPROVED by Sherbo (TG 2085);
+# G2 hosting = his personal account (this repo). Signing secrets are set.
+
+on:
+  schedule:
+    # 00:00 Africa/Cairo on the 21st: 21:00 UTC on the 20th in EEST (+3),
+    # 22:00 UTC on the 20th in EET (+2). The cairo-gate step keeps exactly one.
+    - cron: '0 21,22 20 * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Rebuild even if the latest upstream version is already released'
+        type: boolean
+        default: false
+      version:
+        description: 'Pin a Photos version (must be in bundle supported_versions in clones.json); empty = track upstream latest'
+        type: string
+        default: '' 
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-clones
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.det.outputs.build }}
+      version: ${{ steps.det.outputs.version }}
+      matrix: ${{ steps.det.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Detect upstream version + decide (Cairo 21st gate is inside the script)
+        id: det
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORCE: ${{ inputs.force || false }}
+          PIN_VERSION: ${{ inputs.version || '' }}
+        run: python3 scripts/build_clones.py detect
+
+  build:
+    needs: gate
+    if: needs.gate.outputs.build == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.gate.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Build one clone
+        env:
+          CLONE_LETTER: ${{ matrix.letter }}
+          UPSTREAM_VERSION: ${{ needs.gate.outputs.version }}
+          SIGNING_KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE_B64 }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: python3 scripts/build_clones.py one
+      - name: Verify the built APK
+        env:
+          CLONE_LETTER: ${{ matrix.letter }}
+          UPSTREAM_VERSION: ${{ needs.gate.outputs.version }}
+        run: python3 scripts/build_clones.py verify
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clone-${{ matrix.letter }}
+          path: out/*.apk
+          if-no-files-found: error
+
+  cross-verify:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: clone-*
+          path: out
+      - name: Cross-clone assertions (unique packages, unique authorities, identical spoof identity)
+        run: python3 scripts/build_clones.py cross-verify
+      - uses: actions/upload-artifact@v4
+        with:
+          name: all-clones
+          path: out/**/*.apk
+          if-no-files-found: error
+
+  release:
+    needs: cross-verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: all-clones
+          path: out
+      - name: Release (APKs + SHA256SUMS + meta.json) and bump state
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UPSTREAM_VERSION: ${{ needs.gate.outputs.version }}
+        run: python3 scripts/build_clones.py release
