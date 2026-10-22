@@ -1,0 +1,230 @@
+#!/usr/bin/env python3
+"""Clone builder for MultipleGP. Driven ENTIRELY by clones.json - edit that one
+file (add/rename a clone) and commit; the workflow picks it up.
+
+Subcommands (run by .github/workflows/build-clones.yml):
+  detect        gate job: find newest upstream (mentalblank) version, decide build
+  one           build a single clone APK (env CLONE_LETTER, UPSTREAM_VERSION)
+  verify        assert one built APK's package/authorities/label
+  cross-verify  assert uniqueness across all built clones + identical spoof identity
+  release       create the GitHub release + SHA256SUMS + meta.json, bump state
+
+No builds run before Sherbo's G1 (halal) and G2 (hosting) rulings; the workflow
+is inert until then (schedule gated, secrets absent).
+"""
+import json, os, re, subprocess, sys, hashlib, urllib.request
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CFG = json.load(open(os.path.join(ROOT, "clones.json")))
+OUT = os.path.join(ROOT, "out")
+WORK = os.path.join(ROOT, "work")
+
+MORPHE_CLI = "https://github.com/MorpheApp/morphe-cli/releases/download/v1.3.0/morphe-cli-1.3.0-all.jar"
+APKTOOL = "https://github.com/iBotPeaches/Apktool/releases/download/v2.12.1/apktool_2.12.1.jar"
+
+
+def sh(*args, **kw):
+    print("+", " ".join(str(a) for a in args), flush=True)
+    subprocess.run([str(a) for a in args], check=True, **kw)
+
+
+def gh_api(path, token=None):
+    req = urllib.request.Request("https://api.github.com" + path)
+    req.add_header("Accept", "application/vnd.github+json")
+    tok = token or os.environ.get("GH_TOKEN")
+    if tok:
+        req.add_header("Authorization", "Bearer " + tok)
+    return json.load(urllib.request.urlopen(req))
+
+
+def clone(letter):
+    for c in CFG["clones"]:
+        if c["letter"] == letter:
+            return c
+    sys.exit("no clone with letter %r in clones.json" % letter)
+
+
+def version_of(rel):
+    """First dotted version token in the upstream release tag or title."""
+    for s in (rel.get("tag_name") or "", rel.get("name") or ""):
+        m = re.search(r"(\d+\.\d+(?:\.\d+)*)", s)
+        if m:
+            return m.group(1)
+    sys.exit("could not parse version from upstream release: %r" % rel.get("tag_name"))
+
+
+def cmd_detect():
+    day = os.environ.get("GITHUB_OUTPUT") and open(os.environ["GITHUB_OUTPUT"], "a")
+    force = os.environ.get("FORCE", "false") == "true"
+    if os.environ.get("GITHUB_EVENT_NAME") == "schedule":
+        import datetime, zoneinfo
+        if datetime.datetime.now(zoneinfo.ZoneInfo("Africa/Cairo")).day != 21:
+            print("not the 21st in Cairo - scheduled slot skipped")
+            if day: day.write("build=false\nmatrix=[]\nversion=\n")
+            return
+    rel = gh_api("/repos/%s/releases/latest" % CFG["upstream"]["track_repo"])
+    ver = version_of(rel)
+    tag = "photos-" + ver
+    try:
+        gh_api("/repos/%s/%s/releases/tags/%s" % (os.environ["GITHUB_REPOSITORY_OWNER"], os.environ["GITHUB_REPOSITORY"].split("/")[1], tag))
+        exists = True
+    except Exception:
+        exists = False
+    build = force or not exists
+    print("upstream latest = %s (%s); our release %s exists=%s force=%s -> build=%s"
+          % (ver, rel.get("tag_name"), tag, exists, force, build))
+    matrix = [{"letter": c["letter"], "package": c["package"], "app_name": c["app_name"]} for c in CFG["clones"]]
+    if day:
+        day.write("build=%s\nversion=%s\nmatrix=%s\n" % (str(build).lower(), ver, json.dumps(matrix)))
+
+
+def dl(url, dest):
+    if not os.path.exists(dest):
+        print("download", url)
+        urllib.request.urlretrieve(url, dest)
+
+
+def cmd_one():
+    letter = os.environ["CLONE_LETTER"]
+    ver = os.environ["UPSTREAM_VERSION"]
+    c = clone(letter)
+    os.makedirs(OUT, exist_ok=True)
+    os.makedirs(WORK, exist_ok=True)
+    # 1. stock APK of the tracked version (source of truth = bundle compatibility)
+    stock = os.path.join(WORK, "stock-%s.apk" % ver)
+    if not os.path.exists(stock):
+        last = None
+        for tpl in CFG["upstream"]["stock_apk_sources"]:
+            try:
+                dl(tpl.format(version=ver), stock)
+                break
+            except Exception as e:
+                last = e
+                print("source failed:", tpl, e)
+        else:
+            sys.exit("no stock APK source worked: %s" % last)
+    # 2. custom bundle = clean patches checkout + our overlay
+    dl(MORPHE_CLI, os.path.join(WORK, "morphe.jar"))
+    bundle_dir = os.path.join(WORK, "bundle")
+    if not os.path.exists(bundle_dir):
+        sh("git", "clone", "--depth", "1", "--branch", CFG["bundle"]["patches_ref"],
+           "https://github.com/%s" % CFG["bundle"]["patches_repo"], bundle_dir)
+        sh("cp", "-r", os.path.join(ROOT, "custom-patches", "."), bundle_dir)
+        sh("./gradlew", ":patches:build", cwd=bundle_dir)
+    mpp = None
+    for base, _, files in os.walk(bundle_dir):
+        for f in files:
+            if f.endswith(".mpp"):
+                mpp = os.path.join(base, f)
+    assert mpp, "no .mpp bundle built"
+    # 3. patch with a unique package (drives manifest package + ALL authorities incl. MARS)
+    patched = os.path.join(WORK, "patched-%s.apk" % letter)
+    sh("java", "-jar", os.path.join(WORK, "morphe.jar"), "patch", stock,
+       "-p", mpp, "-e", "Custom package name", "-OpackageName=" + c["package"],
+       "-o", patched)
+    # 4. launcher label: Photos -> Photos<letter> (label only, no visual patches)
+    dl(APKTOOL, os.path.join(WORK, "apktool.jar"))
+    dec = os.path.join(WORK, "dec-%s" % letter)
+    sh("java", "-jar", os.path.join(WORK, "apktool.jar"), "d", "-f", "-o", dec, patched)
+    for base, _, files in os.walk(os.path.join(dec, "res")):
+        for f in files:
+            if f == "strings.xml":
+                p = os.path.join(base, f)
+                s = open(p, encoding="utf-8").read()
+                s2 = re.sub(r'(<string name="app_name">)[^<]*', r"\g<1>" + c["app_name"], s)
+                if s2 != s:
+                    open(p, "w", encoding="utf-8").write(s2)
+    final = os.path.join(OUT, "%s-%s.apk" % (c["app_name"], ver))
+    sh("java", "-jar", os.path.join(WORK, "apktool.jar"), "b", "-o", final, dec)
+    # 5. sign (one key for the whole family; keystore from secrets)
+    ks = os.path.join(WORK, "family.keystore")
+    if not os.path.exists(ks):
+        import base64
+        b64 = os.environ.get("SIGNING_KEYSTORE_B64")
+        if not b64:
+            sys.exit("SIGNING_KEYSTORE_B64 secret missing (G3 key custody not set up yet)")
+        open(ks, "wb").write(base64.b64decode(b64))
+    sh("zipalign", "-p", "4", final, final + ".aligned")
+    os.replace(final + ".aligned", final)
+    sh("apksigner", "sign", "--ks", ks, "--ks-key-alias", os.environ.get("SIGNING_KEY_ALIAS", "family"),
+       "--ks-pass", "env:SIGNING_STORE_PASSWORD", "--key-pass", "env:SIGNING_KEY_PASSWORD", final)
+    print("built", final)
+
+
+def manifest_of(apk, letter):
+    dec = os.path.join(WORK, "verify-%s" % letter)
+    if not os.path.exists(dec):
+        sh("java", "-jar", os.path.join(WORK, "apktool.jar"), "d", "-f", "-s", "-o", dec, apk)
+    return open(os.path.join(dec, "AndroidManifest.xml"), encoding="utf-8").read()
+
+
+def cmd_verify():
+    letter = os.environ["CLONE_LETTER"]
+    ver = os.environ["UPSTREAM_VERSION"]
+    c = clone(letter)
+    apk = os.path.join(OUT, "%s-%s.apk" % (c["app_name"], ver))
+    m = manifest_of(apk, letter)
+    pkg = re.search(r'package="([^"]+)"', m).group(1)
+    assert pkg == c["package"], "package %r != config %r" % (pkg, c["package"])
+    auths = set(re.findall(r'android:authorities="([^"]+)"', m))
+    for a in auths:
+        assert a.startswith(c["package"]) or a.startswith(c["package"] + "."), \
+            "foreign authority %r in %s" % (a, letter)
+    # zero residual fixed authorities from the upstream bundle
+    for bad in ("app.revanced.android.apps.photos.api.mars",
+                "com.google.android.libraries.photos.api.mars",
+                "app.morphe.android.apps.photos"):
+        assert bad not in m or bad == c["package"], "residual authority %s" % bad
+    print("verify OK", letter, pkg, len(auths), "authorities")
+
+
+def cmd_cross_verify():
+    seen_pkg, seen_auth, spoofs = set(), set(), set()
+    for c in CFG["clones"]:
+        for f in os.listdir(OUT):
+            if f.startswith("%s-" % c["app_name"]) and f.endswith(".apk"):
+                m = manifest_of(os.path.join(OUT, f), c["letter"])
+                pkg = re.search(r'package="([^"]+)"', m).group(1)
+                assert pkg not in seen_pkg, "duplicate package " + pkg
+                seen_pkg.add(pkg)
+                for a in re.findall(r'android:authorities="([^"]+)"', m):
+                    assert a not in seen_auth, "authority collision " + a
+                    seen_auth.add(a)
+                spoofs.add(re.search(r'android:authorities="([^"]*api\.mars[^"]*)"', m).group(1).split(".api.mars")[0])
+    print("cross-verify OK:", len(seen_pkg), "unique packages,", len(seen_auth), "unique authorities")
+
+
+def cmd_release():
+    ver = os.environ["UPSTREAM_VERSION"]
+    tag = "photos-" + ver
+    sums = []
+    assets = []
+    for base, _, files in os.walk(OUT):
+        for f in sorted(files):
+            if f.endswith(".apk"):
+                p = os.path.join(base, f)
+                assets.append(p)
+                sums.append("%s  %s" % (hashlib.sha256(open(p, "rb").read()).hexdigest(), f))
+    assert assets, "no APKs to release"
+    open("SHA256SUMS", "w").write("\n".join(sums) + "\n")
+    meta = {"upstream": CFG["upstream"]["track_repo"], "upstream_version": ver,
+            "bundle": CFG["bundle"], "clones": CFG["clones"],
+            "files": [os.path.basename(a) for a in assets]}
+    open("meta.json", "w").write(json.dumps(meta, indent=2) + "\n")
+    sh("gh", "release", "create", tag, *assets, "SHA256SUMS", "meta.json",
+       "--title", "Photos clones %s" % ver,
+       "--notes", "Built from %s @ %s. One APK per clone in clones.json; point Obtainium at this repo and match your variant by filename (e.g. PhotosA-*.apk).")
+    # keepalive + state: a monthly commit keeps the schedule alive (GitHub disables
+    # schedules after 60d of no repo activity)
+    open("state.json", "w").write(json.dumps({"last_built": ver, "tag": tag}) + "\n")
+    sh("git", "config", "user.name", "github-actions[bot]")
+    sh("git", "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com")
+    sh("git", "add", "state.json")
+    subprocess.run(["git", "commit", "-m", "state: built %s" % tag], check=False)
+    sh("git", "push")
+
+
+CMD = {"detect": cmd_detect, "one": cmd_one, "verify": cmd_verify,
+       "cross-verify": cmd_cross_verify, "release": cmd_release}
+if __name__ == "__main__":
+    CMD[sys.argv[1]]()
