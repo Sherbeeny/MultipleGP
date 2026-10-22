@@ -77,12 +77,14 @@ def _heartbeat():
     if os.environ.get("GITHUB_EVENT_NAME") != "schedule":
         return
     import datetime
-    open("heartbeat.txt", "w").write(datetime.datetime.utcnow().isoformat() + "Z\n")
+    open("heartbeat.txt", "w").write(datetime.datetime.now(datetime.timezone.utc).isoformat() + "\n")
     sh("git", "config", "user.name", "github-actions[bot]")
     sh("git", "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com")
     sh("git", "add", "heartbeat.txt")
-    subprocess.run(["git", "commit", "-m", "heartbeat: detect ran, nothing to build"], check=False)
-    subprocess.run(["git", "push"], check=False)
+    rc = subprocess.run(["git", "commit", "-m", "heartbeat: detect ran, nothing to build"], check=False).returncode
+    if rc == 0:
+        # detached HEAD in Actions: push explicitly to main, and fail loudly
+        sh("git", "push", "origin", "HEAD:main")
 
 
 def cmd_detect():
@@ -275,11 +277,15 @@ def cmd_release():
     if os.environ.get("FORCE", "false") == "true":
         subprocess.run(["gh", "release", "delete", tag, "--yes"], check=False)  # force re-release
     open("SHA256SUMS", "w").write("\n".join(sums) + "\n")
+    os.makedirs(WORK, exist_ok=True)
+    dl(MORPHE_CLI, os.path.join(WORK, "morphe.jar"))   # pinned URLs; fetched here
+    dl(APKTOOL, os.path.join(WORK, "apktool.jar"))     # so the hashes are real
     tools = {}
     for name in ("morphe.jar", "apktool.jar"):
         p = os.path.join(WORK, name)
         if os.path.exists(p):
             tools[name] = hashlib.sha256(open(p, "rb").read()).hexdigest()
+    assert tools, "tool jars missing - meta.json tool_sha256 would be empty"
     meta = {"upstream": CFG["upstream"]["track_repo"], "upstream_version": ver,
             "bundle": CFG["bundle"], "clones": CFG["clones"],
             "files": [os.path.basename(a) for a in assets], "tool_sha256": tools}
@@ -294,8 +300,10 @@ def cmd_release():
     sh("git", "config", "user.name", "github-actions[bot]")
     sh("git", "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com")
     sh("git", "add", "state.json")
-    subprocess.run(["git", "commit", "-m", "state: built %s" % tag], check=False)
-    sh("git", "push")
+    rc = subprocess.run(["git", "commit", "-m", "state: built %s" % tag], check=False).returncode
+    if rc == 0:
+        # detached HEAD in Actions: push explicitly to main
+        sh("git", "push", "origin", "HEAD:main")
 
 
 CMD = {"detect": cmd_detect, "one": cmd_one, "verify": cmd_verify,
