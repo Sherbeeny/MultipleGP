@@ -135,6 +135,20 @@ def dl(url, dest):
         urllib.request.urlretrieve(url, dest)
 
 
+def sdk_tool(name):
+    """build-tools binaries (apksigner, zipalign) are NOT on PATH on GitHub
+    runners; they live in the preinstalled Android SDK under build-tools/<ver>/.
+    Resolve dynamically (no setup action needed)."""
+    import shutil, glob
+    w = shutil.which(name)
+    if w:
+        return w
+    home = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT") or ""
+    cands = sorted(glob.glob(os.path.join(home, "build-tools", "*", name)))
+    assert cands, "%s not found on PATH or under %s/build-tools" % (name, home)
+    return cands[-1]
+
+
 def cmd_one():
     letter = os.environ["CLONE_LETTER"]
     ver = os.environ["UPSTREAM_VERSION"]
@@ -190,9 +204,9 @@ def cmd_one():
         if not b64:
             sys.exit("SIGNING_KEYSTORE_B64 secret missing (key custody not set up yet)")
         open(ks, "wb").write(base64.b64decode(b64))
-    sh("zipalign", "-p", "4", final, final + ".aligned")
+    sh(sdk_tool("zipalign"), "-p", "4", final, final + ".aligned")
     os.replace(final + ".aligned", final)
-    sh("apksigner", "sign", "--ks", ks, "--ks-key-alias", os.environ.get("SIGNING_KEY_ALIAS", "family"),
+    sh(sdk_tool("apksigner"), "sign", "--ks", ks, "--ks-key-alias", os.environ.get("SIGNING_KEY_ALIAS", "family"),
        "--ks-pass", "env:SIGNING_STORE_PASSWORD", "--key-pass", "env:SIGNING_KEY_PASSWORD", final)
     print("built", final)
 
@@ -248,7 +262,7 @@ def cmd_cross_verify():
                 sid = spoof_identity(m)
                 assert sid, "spoof meta-data missing in " + c["letter"]
                 spoof_ids.add(tuple(sorted(sid.items())))
-                r = subprocess.run(["apksigner", "verify", "--print-certs",
+                r = subprocess.run([sdk_tool("apksigner"), "verify", "--print-certs",
                                     os.path.join(OUT, f)], capture_output=True, text=True, check=True)
                 dig = tuple(sorted(l.split(":", 1)[1].strip() for l in r.stdout.splitlines()
                                    if "certificate SHA-256 digest" in l))
