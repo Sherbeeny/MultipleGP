@@ -202,6 +202,74 @@ def sdk_tool(name):
     return cands[-1]
 
 
+
+
+def _ns_register(manifest_text):
+    import xml.etree.ElementTree as ET
+    import io
+    for event, ns in ET.iterparse(io.StringIO(manifest_text), events=("start-ns",)):
+        prefix, uri = ns
+        try:
+            ET.register_namespace(prefix, uri)
+        except ValueError:
+            pass
+
+
+def _launcher_components(root):
+    """The <application> element plus every activity/activity-alias carrying a
+    MAIN+LAUNCHER intent-filter. The launcher reads the activity label first,
+    then the application label; all of them must carry the clone label."""
+    import xml.etree.ElementTree as ET
+    A = "{http://schemas.android.com/apk/res/android}"
+    app = root.find("application")
+    assert app is not None, "manifest has no <application>"
+    out = [app]
+    for tag in ("activity", "activity-alias"):
+        for el in app.findall(tag):
+            for f in el.findall("intent-filter"):
+                acts = [a.get(A + "name") for a in f.findall("action")]
+                cats = [c.get(A + "name") for c in f.findall("category")]
+                if "android.intent.action.MAIN" in acts and \
+                        "android.intent.category.LAUNCHER" in cats:
+                    out.append(el)
+                    break
+    return out
+
+
+def patch_launcher_labels(manifest_path, label):
+    """Literal android:label on the application tag and every launcher
+    activity/activity-alias. Resource-reference labels (@string/...) survive
+    the app_name string patch because upstream points them at other strings,
+    so the label is written literally into the manifest."""
+    import xml.etree.ElementTree as ET
+    text = open(manifest_path, encoding="utf-8").read()
+    _ns_register(text)
+    root = ET.fromstring(text)
+    A = "{http://schemas.android.com/apk/res/android}"
+    comps = _launcher_components(root)
+    assert len(comps) >= 2, "no launcher activity found in " + manifest_path
+    for el in comps:
+        el.set(A + "label", label)
+    ET.ElementTree(root).write(manifest_path, encoding="unicode",
+                               xml_declaration=True)
+    print("launcher label set to %r on %d components" % (label, len(comps)))
+
+
+def check_launcher_labels(manifest_text, label):
+    """Verify-side assertion: application + every launcher component carry the
+    literal clone label."""
+    import xml.etree.ElementTree as ET
+    _ns_register(manifest_text)
+    root = ET.fromstring(manifest_text)
+    A = "{http://schemas.android.com/apk/res/android}"
+    comps = _launcher_components(root)
+    assert len(comps) >= 2, "no launcher activity found in manifest"
+    for el in comps:
+        got = el.get(A + "label")
+        assert got == label, "launcher label %r != %r on %s" % (
+            got, label, el.get(A + "name", "application"))
+
+
 def replace_pkg_in_tree(root, new_pkg):
     """Rename every upstream package occurrence to the clone package across all
     text files of a decoded APK tree (manifest, smali, xml, properties)."""
@@ -250,6 +318,8 @@ def cmd_one():
     sh("java", "-jar", os.path.join(WORK, "apktool.jar"), "d", "-f", "-o", dec, stock)
     hits = replace_pkg_in_tree(dec, c["package"])
     assert hits, "package rename found nothing - upstream package scheme changed?"
+    label = c.get("label") or c["app_name"]
+    patch_launcher_labels(os.path.join(dec, "AndroidManifest.xml"), label)
     for base, _, files in os.walk(os.path.join(dec, "res")):
         for f in files:
             if f == "strings.xml":
@@ -312,6 +382,7 @@ def cmd_verify():
                 "com.google.android.libraries.photos.api.mars",
                 "app.morphe.android.apps.photos"):
         assert bad not in m, "residual upstream identity %s in %s" % (bad, letter)
+    check_launcher_labels(m, c.get("label") or c["app_name"])
     sid = spoof_identity(m)
     assert any("SPOOFED_PACKAGE_NAME" in k for k in sid), "SPOOFED_PACKAGE_NAME meta-data missing"
     assert any("SPOOFED_PACKAGE_SIGNATURE" in k for k in sid), "SPOOFED_PACKAGE_SIGNATURE meta-data missing"
@@ -335,6 +406,7 @@ def cmd_cross_verify():
                 mp = re.search(r'android:authorities="([^"]*api\.mars[^"]*)"', m)
                 assert mp, "no MARS authority in " + c["letter"]
                 mars_prefixes.add(mp.group(1).split(".api.mars")[0])
+                check_launcher_labels(m, c.get("label") or c["app_name"])
                 sid = spoof_identity(m)
                 assert sid, "spoof meta-data missing in " + c["letter"]
                 spoof_ids.add(tuple(sorted(sid.items())))
