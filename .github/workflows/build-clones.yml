@@ -61,7 +61,6 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
       - name: Build one clone
         env:
           CLONE_LETTER: ${{ matrix.letter }}
@@ -91,7 +90,6 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
       - uses: actions/download-artifact@v4
         with:
           pattern: clone-*
