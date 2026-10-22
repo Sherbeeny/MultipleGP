@@ -94,9 +94,15 @@ def cmd_detect():
             print("not the 21st in Cairo - scheduled slot skipped")
             if out: out.write("build=false\nmatrix=[]\nversion=\n")
             return
-    rel = gh_api("/repos/%s/releases/latest" % CFG["upstream"]["track_repo"])
-    ver = version_of(rel)
     supported = CFG["bundle"].get("supported_versions", [])
+    pin = os.environ.get("PIN_VERSION", "").strip()
+    if pin:
+        # Manual dispatch pinned a version: it must be bundle-supported.
+        ver = pin
+        print("manual version pin:", ver)
+    else:
+        rel = gh_api("/repos/%s/releases/latest" % CFG["upstream"]["track_repo"])
+        ver = version_of(rel)
     if supported and ver not in supported:
         print("upstream %s NOT in bundle supported_versions %s - skipping (no broken build, no release)"
               % (ver, supported))
