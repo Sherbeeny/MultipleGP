@@ -10,7 +10,11 @@
   "bundle": {
     "patches_repo": "Akash-Sriram/morphe-google-photos",
     "patches_ref": "v1.15.4",
-    "note": "Repo + tag verified live 2026-10-22. The earlier De-Vanced/morphe-google-photos name 404s (Kaleem review). Akash-Sriram carries no license file (headers point at GPL-3.0 ReVanced lineage); used as the patch BUNDLE base, no source copied."
+    "note": "Repo + tag verified live 2026-10-22. The earlier De-Vanced/morphe-google-photos name 404s (Kaleem review). Akash-Sriram carries no license file (headers point at GPL-3.0 ReVanced lineage); used as the patch BUNDLE base, no source copied.",
+    "supported_versions": [
+      "7.97.0.997578476"
+    ],
+    "supported_versions_note": "Gate: detect only builds when the upstream Photos version is in this list (the pinned bundle patches only these). Update when the bundle adds a version."
   },
   "clones": [
     {
