@@ -71,6 +71,20 @@ def spoof_identity(manifest):
     return out
 
 
+def _heartbeat():
+    """Monthly activity commit so GitHub never auto-disables the schedule
+    (60d inactivity policy), even when there is nothing to build."""
+    if os.environ.get("GITHUB_EVENT_NAME") != "schedule":
+        return
+    import datetime
+    open("heartbeat.txt", "w").write(datetime.datetime.utcnow().isoformat() + "Z\n")
+    sh("git", "config", "user.name", "github-actions[bot]")
+    sh("git", "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com")
+    sh("git", "add", "heartbeat.txt")
+    subprocess.run(["git", "commit", "-m", "heartbeat: detect ran, nothing to build"], check=False)
+    subprocess.run(["git", "push"], check=False)
+
+
 def cmd_detect():
     out = os.environ.get("GITHUB_OUTPUT") and open(os.environ["GITHUB_OUTPUT"], "a")
     force = os.environ.get("FORCE", "false") == "true"
@@ -82,6 +96,13 @@ def cmd_detect():
             return
     rel = gh_api("/repos/%s/releases/latest" % CFG["upstream"]["track_repo"])
     ver = version_of(rel)
+    supported = CFG["bundle"].get("supported_versions", [])
+    if supported and ver not in supported:
+        print("upstream %s NOT in bundle supported_versions %s - skipping (no broken build, no release)"
+              % (ver, supported))
+        if out: out.write("build=false\nmatrix=[]\nversion=%s\n" % ver)
+        _heartbeat()
+        return
     tag = "photos-" + ver
     repo = os.environ["GITHUB_REPOSITORY"]
     try:
@@ -92,6 +113,8 @@ def cmd_detect():
     build = force or not exists
     print("upstream latest = %s (%s); our release %s exists=%s force=%s -> build=%s"
           % (ver, rel.get("tag_name"), tag, exists, force, build))
+    if not build:
+        _heartbeat()
     matrix = [{"letter": c["letter"], "package": c["package"], "app_name": c["app_name"]} for c in CFG["clones"]]
     if out:
         out.write("build=%s\nversion=%s\nmatrix=%s\n" % (str(build).lower(), ver, json.dumps(matrix)))
@@ -180,9 +203,12 @@ def cmd_verify():
     m = manifest_of(apk, letter)
     pkg = re.search(r'package="([^"]+)"', m).group(1)
     assert pkg == c["package"], "package %r != config %r" % (pkg, c["package"])
+    vn = re.search(r'android:versionName="([^"]+)"', m)
+    assert vn and vn.group(1) == ver, "versionName %r != upstream %s" % (vn and vn.group(1), ver)
     auths = set(re.findall(r'android:authorities="([^"]+)"', m))
     for a in auths:
-        assert a.startswith(c["package"]), "foreign authority %r in %s" % (a, letter)
+        assert a == c["package"] or a.startswith(c["package"] + "."), \
+            "foreign authority %r in %s" % (a, letter)
     for bad in ("app.revanced.android.apps.photos",
                 "com.google.android.libraries.photos.api.mars",
                 "app.morphe.android.apps.photos"):
@@ -194,7 +220,9 @@ def cmd_verify():
 
 
 def cmd_cross_verify():
-    seen_pkg, seen_auth, mars_prefixes, spoof_ids = set(), set(), set(), set()
+    os.makedirs(WORK, exist_ok=True)
+    dl(APKTOOL, os.path.join(WORK, "apktool.jar"))
+    seen_pkg, seen_auth, mars_prefixes, spoof_ids, certs = set(), set(), set(), set(), set()
     for c in CFG["clones"]:
         for f in os.listdir(OUT):
             if f.startswith("%s-" % c["app_name"]) and f.endswith(".apk"):
@@ -211,10 +239,18 @@ def cmd_cross_verify():
                 sid = spoof_identity(m)
                 assert sid, "spoof meta-data missing in " + c["letter"]
                 spoof_ids.add(tuple(sorted(sid.items())))
+                r = subprocess.run(["apksigner", "verify", "--print-certs",
+                                    os.path.join(OUT, f)], capture_output=True, text=True, check=True)
+                dig = tuple(sorted(l.split(":", 1)[1].strip() for l in r.stdout.splitlines()
+                                   if "certificate SHA-256 digest" in l))
+                assert dig, "no signing cert found in " + f
+                certs.add(dig)
     # MARS prefixes must DIFFER per clone (they are package-scoped) ...
     assert len(mars_prefixes) == len(seen_pkg), "MARS prefixes not unique per clone"
     # ... while the spoofed identity is byte-identical across the whole family
     assert len(spoof_ids) == 1, "spoof identity differs across clones: %r" % (spoof_ids,)
+    # ... and every APK is signed by the SAME certificate (updates install cleanly)
+    assert len(certs) == 1, "signing certs differ across clones"
     print("cross-verify OK:", len(seen_pkg), "unique packages,", len(seen_auth),
           "unique authorities, one shared spoof identity")
 
@@ -230,10 +266,17 @@ def cmd_release():
                 assets.append(p)
                 sums.append("%s  %s" % (hashlib.sha256(open(p, "rb").read()).hexdigest(), f))
     assert assets, "no APKs to release"
+    if os.environ.get("FORCE", "false") == "true":
+        subprocess.run(["gh", "release", "delete", tag, "--yes"], check=False)  # force re-release
     open("SHA256SUMS", "w").write("\n".join(sums) + "\n")
+    tools = {}
+    for name in ("morphe.jar", "apktool.jar"):
+        p = os.path.join(WORK, name)
+        if os.path.exists(p):
+            tools[name] = hashlib.sha256(open(p, "rb").read()).hexdigest()
     meta = {"upstream": CFG["upstream"]["track_repo"], "upstream_version": ver,
             "bundle": CFG["bundle"], "clones": CFG["clones"],
-            "files": [os.path.basename(a) for a in assets]}
+            "files": [os.path.basename(a) for a in assets], "tool_sha256": tools}
     open("meta.json", "w").write(json.dumps(meta, indent=2) + "\n")
     sh("gh", "release", "create", tag, *assets, "SHA256SUMS", "meta.json",
        "--title", "Photos clones %s" % ver,
