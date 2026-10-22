@@ -4,8 +4,8 @@ name: Build Google Photos clones
 # - track mentalblank/GPhotos-Revanced for new versions
 # - run on the 21st of each month + manual dispatch
 # - build the clones from clones.json and put them in Releases for Obtainium
-# GATES (still pending with Sherbo): G1 halal ruling on the unlimited-original
-# spoof; G2 hosting-account ruling. Do NOT enable runs before both rulings.
+# GATES CLEARED 2026-10-22: G1 halal ruling APPROVED by Sherbo (TG 2085);
+# G2 hosting = his personal account (this repo). Signing secrets are set.
 
 on:
   schedule:
