@@ -1,5 +1,5 @@
 {
-  "comment": "Single source of truth for the clone family. Add a copy or rename one by editing ONLY this file and committing; the next scheduled (21st, Africa/Cairo) or manual run picks it up. 'letter' is the variant letter; app_name is the launcher label; package must be unique per clone and stay fixed FOREVER once a clone has been installed on a device (renaming a package = new app, old data orphaned).",
+  "comment": "Single source of truth for the clone family. Add a copy or rename one by editing ONLY this file and committing; the next scheduled (21st, Africa/Cairo) or manual run picks it up. 'letter' is the variant letter; app_name is the APK filename stem; label is the launcher-visible name (written literally onto the application tag and every launcher activity/activity-alias, #12); package must be unique per clone and stay fixed FOREVER once a clone has been installed on a device (renaming a package = new app, old data orphaned).",
   "upstream": {
     "track_repo": "mentalblank/GPhotos-Revanced",
     "pinned_version": null,
@@ -9,22 +9,26 @@
     {
       "letter": "A",
       "app_name": "PhotosA",
-      "package": "app.gclone.a"
+      "package": "app.gclone.a",
+      "label": "PhotosA"
     },
     {
       "letter": "S",
       "app_name": "PhotosS",
-      "package": "app.gclone.s"
+      "package": "app.gclone.s",
+      "label": "PhotosS"
     },
     {
       "letter": "W",
       "app_name": "PhotosW",
-      "package": "app.gclone.w"
+      "package": "app.gclone.w",
+      "label": "PhotosW"
     },
     {
       "letter": "X",
       "app_name": "PhotosX",
-      "package": "app.gclone.x"
+      "package": "app.gclone.x",
+      "label": "PhotosX"
     }
   ]
 }
