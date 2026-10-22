@@ -35,22 +35,25 @@ bundle as usual (`./gradlew :patches:build`). The new patch appears as
 ```
 java -jar morphe.jar patch <base.apk> \
   -p patches-custom.mpp \
-  -e "Custom package name" -OpackageName=app.morphe.android.apps.photos.c1 \
-  -o clone-c1.apk
+  -e "Custom package name" -OpackageName=app.gclone.a \
+  -o PhotosA-7.97.0.997578476.apk
 ```
 
 - Base APK: Google Photos 7.97.0.997578476 (universal, nodpi) - the only version
   the v1.15.4 bundle targets. Source: APKMirror.
-- Each clone needs its own packageName value (c1, c2, c3, ...). Never reuse one.
+- Each clone needs its own packageName value. The live family is Letters, not
+  numbers: PhotosA/PhotosS/PhotosW/PhotosX -> app.gclone.a/.s/.w/.x, all driven
+  by clones.json at the repo root (edit that ONE file to add or rename a copy).
+  Never reuse a package value; once installed, a package name is fixed forever.
 - Sign every clone with the same keystore so future updates install cleanly.
 - MicroG-RE (one install) serves all clones: it keys auth tokens per
   package+signature and reads the spoof metadata the bundle injects.
 
-## Verified example output (clone c1)
+## Verified example output (clone A)
 
-- `package="app.morphe.android.apps.photos.c1"`
+- `package="app.gclone.a"` (was app.morphe.android.apps.photos.c1 in the original c1/c2/c3 verification)
 - every provider authority under the same scope, e.g.
-  `app.morphe.android.apps.photos.c1.api.mars`
+  `app.gclone.a.api.mars`
 - spoof metadata `app.revanced.android.gms.SPOOFED_PACKAGE_NAME` /
   `SPOOFED_PACKAGE_SIGNATURE` present
 - versionName 7.97.0.997578476 / versionCode 52547203
