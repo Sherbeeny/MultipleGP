@@ -4,6 +4,11 @@ name: Build Google Photos clones
 # - track mentalblank/GPhotos-Revanced for new versions
 # - run on the 21st of each month + manual dispatch
 # - build the clones from clones.json and put them in Releases for Obtainium
+# - 05:06 order: the ONLY APK source is that repo's release assets (already
+#   De-Vanced-patched); store the last processed upstream tag in state.json and
+#   build only when upstream released something newer; focus the best
+#   a12-supported version (minSdk <= 31 enforced in verify), overridable via
+#   clones.json upstream.pinned_version.
 # GATES CLEARED 2026-10-22: G1 halal ruling APPROVED by Sherbo (TG 2085);
 # G2 hosting = his personal account (this repo). Signing secrets are set.
 
@@ -15,13 +20,13 @@ on:
   workflow_dispatch:
     inputs:
       force:
-        description: 'Rebuild even if the latest upstream version is already released'
+        description: 'Rebuild even if the latest upstream release is already processed'
         type: boolean
         default: false
       version:
-        description: 'Pin a Photos version (must be in bundle supported_versions in clones.json); empty = track upstream latest'
+        description: 'Pin a Photos version (an upstream release asset must carry it); empty = track upstream latest / clones.json pinned_version'
         type: string
-        default: '' 
+        default: ''
 
 permissions:
   contents: write
@@ -37,6 +42,8 @@ jobs:
       build: ${{ steps.det.outputs.build }}
       version: ${{ steps.det.outputs.version }}
       matrix: ${{ steps.det.outputs.matrix }}
+      asset_url: ${{ steps.det.outputs.asset_url }}
+      upstream_tag: ${{ steps.det.outputs.upstream_tag }}
     steps:
       - uses: actions/checkout@v4
       - name: Detect upstream version + decide (Cairo 21st gate is inside the script)
@@ -65,6 +72,7 @@ jobs:
         env:
           CLONE_LETTER: ${{ matrix.letter }}
           UPSTREAM_VERSION: ${{ needs.gate.outputs.version }}
+          ASSET_URL: ${{ needs.gate.outputs.asset_url }}
           SIGNING_KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE_B64 }}
           SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
           SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
@@ -111,8 +119,9 @@ jobs:
         with:
           name: all-clones
           path: out
-      - name: Release (APKs + SHA256SUMS + meta.json) and bump state
+      - name: Release (APKs + SHA256SUMS + meta.json) and bump state.json
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           UPSTREAM_VERSION: ${{ needs.gate.outputs.version }}
+          UPSTREAM_TAG: ${{ needs.gate.outputs.upstream_tag }}
         run: python3 scripts/build_clones.py release

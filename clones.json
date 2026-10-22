@@ -2,19 +2,8 @@
   "comment": "Single source of truth for the clone family. Add a copy or rename one by editing ONLY this file and committing; the next scheduled (21st, Africa/Cairo) or manual run picks it up. 'letter' is the variant letter; app_name is the launcher label; package must be unique per clone and stay fixed FOREVER once a clone has been installed on a device (renaming a package = new app, old data orphaned).",
   "upstream": {
     "track_repo": "mentalblank/GPhotos-Revanced",
-    "stock_apk_sources": [
-      "https://archive.org/download/jhc-apks/com.google.android.apps.photos_{version}.apk",
-      "https://d.apkpure.com/b/APK/com.google.android.apps.photos?version={version}"
-    ]
-  },
-  "bundle": {
-    "patches_repo": "Akash-Sriram/morphe-google-photos",
-    "patches_ref": "v1.15.4",
-    "note": "Repo + tag verified live 2026-10-22. The earlier De-Vanced/morphe-google-photos name 404s (Kaleem review). Akash-Sriram carries no license file (headers point at GPL-3.0 ReVanced lineage); used as the patch BUNDLE base, no source copied.",
-    "supported_versions": [
-      "7.97.0.997578476"
-    ],
-    "supported_versions_note": "Gate: detect only builds when the upstream Photos version is in this list (the pinned bundle patches only these). Update when the bundle adds a version."
+    "pinned_version": null,
+    "note": "SOLE APK source (Sherbo, topic 76, 2026-10-22): the release assets of track_repo. Upstream ships one universal, already-De-Vanced-patched APK per release (Pixel-feature spoof incl. unlimited storage, DCIM backup control, account-persistence fix); no stock mirrors, no local patch bundle. pinned_version: null = track the latest upstream release each monthly cycle; set a Photos version string (e.g. \"7.92.0.977185651\") to focus that exact version - Sherbo can change it here. Built clones must keep minSdk <= 31 (Android 12); verify fails loudly otherwise."
   },
   "clones": [
     {
