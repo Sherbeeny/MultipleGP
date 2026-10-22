@@ -248,7 +248,8 @@ def cmd_one():
     dl(APKTOOL, os.path.join(WORK, "apktool.jar"))
     dec = os.path.join(WORK, "dec-%s" % letter)
     sh("java", "-jar", os.path.join(WORK, "apktool.jar"), "d", "-f", "-o", dec, stock)
-    replace_pkg_in_tree(dec, c["package"])
+    hits = replace_pkg_in_tree(dec, c["package"])
+    assert hits, "package rename found nothing - upstream package scheme changed?"
     for base, _, files in os.walk(os.path.join(dec, "res")):
         for f in files:
             if f == "strings.xml":
@@ -280,6 +281,16 @@ def manifest_of(apk, letter):
     return open(os.path.join(dec, "AndroidManifest.xml"), encoding="utf-8").read()
 
 
+def apkmeta(dec_dir):
+    """versionName/versionCode/minSdkVersion of a decoded APK. apktool STRIPS
+    these from the decoded AndroidManifest.xml into apktool.yml - read them here."""
+    y = open(os.path.join(dec_dir, "apktool.yml"), encoding="utf-8").read()
+    def g(k):
+        m = re.search(r'^\s*%s: "?([^"\n]+)"?\s*$' % k, y, re.M)
+        return m.group(1) if m else None
+    return g("versionName"), g("versionCode"), g("minSdkVersion")
+
+
 def cmd_verify():
     letter = os.environ["CLONE_LETTER"]
     ver = os.environ["UPSTREAM_VERSION"]
@@ -288,11 +299,11 @@ def cmd_verify():
     m = manifest_of(apk, letter)
     pkg = re.search(r'package="([^"]+)"', m).group(1)
     assert pkg == c["package"], "package %r != config %r" % (pkg, c["package"])
-    vn = re.search(r'android:versionName="([^"]+)"', m)
-    assert vn and vn.group(1) == ver, "versionName %r != upstream %s" % (vn and vn.group(1), ver)
-    ms = re.search(r'android:minSdkVersion="(\d+)"', m)
-    assert ms and int(ms.group(1)) <= A12_MAX_MINSDK, \
-        "minSdk %s breaks Android 12 support (pin an older version in clones.json)" % (ms and ms.group(1))
+    vn, vc, ms = apkmeta(os.path.join(WORK, "verify-%s" % letter))
+    assert vn == ver, "versionName %r != upstream %s" % (vn, ver)
+    assert vc and vc.isdigit(), "versionCode %r not numeric" % (vc,)
+    assert ms and int(ms) <= A12_MAX_MINSDK, \
+        "minSdk %s breaks Android 12 support (pin an older version in clones.json)" % (ms,)
     auths = set(re.findall(r'android:authorities="([^"]+)"', m))
     for a in auths:
         assert a == c["package"] or a.startswith(c["package"] + "."), \
