@@ -102,6 +102,7 @@ jobs:
         with:
           pattern: clone-*
           path: out
+          merge-multiple: true
       - name: Cross-clone assertions (unique packages, unique authorities, identical spoof identity)
         run: python3 scripts/build_clones.py cross-verify
       - uses: actions/upload-artifact@v4
