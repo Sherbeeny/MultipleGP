@@ -121,7 +121,7 @@ def cmd_detect():
         exists = False
     build = force or not exists
     print("upstream latest = %s (%s); our release %s exists=%s force=%s -> build=%s"
-          % (ver, (rel or {}).get("tag_name"), tag, exists, force, build))
+          % (ver, (rel or {}).get("tag_name") or "pinned", tag, exists, force, build))
     if not build:
         _heartbeat()
     matrix = [{"letter": c["letter"], "package": c["package"], "app_name": c["app_name"]} for c in CFG["clones"]]
